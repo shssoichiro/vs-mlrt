@@ -600,6 +600,10 @@ static const VSFrameRef *VS_CC vsMIGXGetFrame(
 #else // MIGRAPHX_VERSION_TWEAK
                 checkHIPError(hipStreamSynchronize(instance.stream));
 
+                // Release MIGraphX outputs container to avoid lifetime
+                // extending past program destruction on ROCm 7.x.
+                checkError(migraphx_arguments_destroy(outputs));
+
                 checkError(migraphx_program_run(
                     &outputs,
                     d->program,
@@ -703,13 +707,13 @@ static void VS_CC vsMIGXFree(
     }
     checkHIPError(hipDeviceSynchronize());
 
-    // Explicitly destroy per-stream resources (streams, device/host buffers,
-    // and MIGraphX parameter/argument handles) before destroying the program.
+    // Destroy the MIGraphX program first after quiescing streams/device.
+    checkError(migraphx_program_destroy(d->program));
+
+    // Then explicitly drop per-stream resources (streams, device/host buffers,
+    // and MIGraphX parameter/argument handles).
     d->instances.clear();
     d->instances.shrink_to_fit();
-
-    // Now it is safe to destroy the MIGraphX program.
-    checkError(migraphx_program_destroy(d->program));
 
     delete d;
 }
