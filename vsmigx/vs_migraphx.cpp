@@ -382,12 +382,13 @@ struct MemoryResource {
 };
 
 struct InferenceInstance {
+    // Place stream first so it is destroyed last (reverse field destruction order).
+    Resource<hipStream_t, hipStreamDestroy> stream;
     MemoryResource src;
     MemoryResource dst;
     Resource<migraphx_program_parameters_t, migraphx_program_parameters_destroy> params;
     Resource<migraphx_argument_t, migraphx_argument_destroy> src_argument;
     Resource<migraphx_argument_t, migraphx_argument_destroy> dst_argument;
-    Resource<hipStream_t, hipStreamDestroy> stream;
 };
 
 struct vsMIGXData {
@@ -595,7 +596,7 @@ static const VSFrameRef *VS_CC vsMIGXGetFrame(
                     d->program,
                     instance.params,
                     instance.stream.data,
-                    "ihipStream_t"
+                    "hip"
                 ));
 #else // MIGRAPHX_VERSION_TWEAK
                 checkHIPError(hipStreamSynchronize(instance.stream));
@@ -707,13 +708,13 @@ static void VS_CC vsMIGXFree(
     }
     checkHIPError(hipDeviceSynchronize());
 
-    // Destroy the MIGraphX program first after quiescing streams/device.
-    checkError(migraphx_program_destroy(d->program));
-
-    // Then explicitly drop per-stream resources (streams, device/host buffers,
-    // and MIGraphX parameter/argument handles).
+    // Drop per-stream resources first (arguments/params/buffers/streams) to ensure
+    // MIGraphX program no longer has external references.
     d->instances.clear();
     d->instances.shrink_to_fit();
+
+    // Now destroy the MIGraphX program.
+    checkError(migraphx_program_destroy(d->program));
 
     delete d;
 }
