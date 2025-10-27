@@ -692,6 +692,23 @@ static void VS_CC vsMIGXFree(
         fprintf(stderr, "%s\n", error_message.c_str());
     };
 
+    // Ensure the correct HIP device is current before destroying HIP resources.
+    // ROCm 7.0 appears stricter about context association for hipFree/hipStreamDestroy,
+    // and MIGraphX may tear down runtime state during program destruction.
+    // Destroy HIP-side resources first while the device/context is valid.
+    checkHIPError(hipSetDevice(d->device_id));
+    // Make sure all streams are idle before tearing anything down.
+    for (auto & instance : d->instances) {
+        checkHIPError(hipStreamSynchronize(instance.stream));
+    }
+    checkHIPError(hipDeviceSynchronize());
+
+    // Explicitly destroy per-stream resources (streams, device/host buffers,
+    // and MIGraphX parameter/argument handles) before destroying the program.
+    d->instances.clear();
+    d->instances.shrink_to_fit();
+
+    // Now it is safe to destroy the MIGraphX program.
     checkError(migraphx_program_destroy(d->program));
 
     delete d;
